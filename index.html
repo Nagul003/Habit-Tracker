@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1% Better - Habit Tracker</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0a0a0a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #root {
+      display: flex;
+      height: 100vh;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    /* ---------- design tokens ---------- */
+    const T = {
+      bg: "#131311",
+      surface: "#1C1B17",
+      surface2: "#232219",
+      border: "#332F26",
+      borderSoft: "#242219",
+      text: "#EDECE6",
+      textDim: "#8C8A80",
+      textFaint: "#5C5A50",
+      lime: "#C8FF4D",
+      limeDim: "#8FB53A",
+      amber: "#FFB13C",
+      coral: "#FF6B5C",
+      grid: "#211F19",
+    };
+
+    const HABIT_COLORS = [
+      { name: "lime", hex: "#C8FF4D" },
+      { name: "sky", hex: "#5CC8FF" },
+      { name: "amber", hex: "#FFB13C" },
+      { name: "violet", hex: "#B78CFF" },
+      { name: "coral", hex: "#FF6B5C" },
+      { name: "mint", hex: "#5CFFB0" },
+      { name: "rose", hex: "#FF7FA6" },
+      { name: "gold", hex: "#E8D24C" },
+    ];
+
+    const STORAGE_KEY = "onepercent-tracker-v1";
+    const CATEGORIES = [
+      { id: "health", name: "Health", color: "#FF6B5C" },
+      { id: "learning", name: "Learning", color: "#5CC8FF" },
+      { id: "fitness", name: "Fitness", color: "#C8FF4D" },
+      { id: "finance", name: "Finance", color: "#E8D24C" },
+      { id: "personal", name: "Personal", color: "#B78CFF" },
+      { id: "work", name: "Work", color: "#5CFFB0" },
+    ];
+    const DIFFICULTY_LEVELS = [
+      { id: "easy", label: "Easy", weight: 1 },
+      { id: "medium", label: "Medium", weight: 2 },
+      { id: "hard", label: "Hard", weight: 3 },
+    ];
+    const HABIT_TEMPLATES = [
+      { name: "Morning Walk", category: "health", difficulty: "easy", frequency: "daily" },
+      { name: "Read 10 Pages", category: "learning", difficulty: "easy", frequency: "daily" },
+      { name: "Gym Session", category: "fitness", difficulty: "hard", frequency: "daily" },
+      { name: "Meditate", category: "health", difficulty: "medium", frequency: "daily" },
+      { name: "Save Money", category: "finance", difficulty: "easy", frequency: "daily" },
+      { name: "Code/Program", category: "learning", difficulty: "hard", frequency: "weekdays" },
+      { name: "No Sugar", category: "health", difficulty: "medium", frequency: "daily" },
+      { name: "Journaling", category: "personal", difficulty: "easy", frequency: "daily" },
+    ];
+
+    const MOTIVATIONAL_QUOTES = [
+      { text: "Success is the sum of small efforts repeated day after day.", author: "Robert Collier" },
+      { text: "We are what we repeatedly do. Excellence then, is not an act, but a habit.", author: "Aristotle" },
+      { text: "You don't have to be great to start, but you have to start to be great.", author: "Zig Ziglar" },
+      { text: "The secret of getting ahead is getting started.", author: "Mark Twain" },
+      { text: "Excellence is not a skill, it's an attitude.", author: "Ralph Marston" },
+      { text: "A journey of a thousand miles begins with a single step.", author: "Lao Tzu" },
+      { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+      { text: "Don't watch the clock; do what it does. Keep going.", author: "Sam Levenson" },
+      { text: "Great things are done by a series of small things brought together.", author: "Vincent Van Gogh" },
+      { text: "The difference between who you are and who you want to be is what you do.", author: "Bill Phillips" },
+      { text: "Motivation is what gets you started. Habit is what keeps you going.", author: "Jim Ryun" },
+      { text: "Your only limit is your soul.", author: "Unknown" },
+      { text: "Act as if what you do makes a difference. It does.", author: "William James" },
+      { text: "The key to success is to focus on goals, not obstacles.", author: "Unknown" },
+      { text: "Every accomplishment starts with the decision to try.", author: "Unknown" },
+      { text: "Progress is progress, no matter how small.", author: "Unknown" },
+      { text: "Discipline is choosing between what you want now and what you want most.", author: "Abraham Lincoln" },
+      { text: "You don't rise to the level of your goals, you fall to the level of your systems.", author: "James Clear" },
+    ];
+
+    // Simple localStorage wrapper for window.storage
+    window.storage = {
+      get: async (key, defaultVal) => {
+        try {
+          const value = localStorage.getItem(key);
+          return { value: value || defaultVal };
+        } catch (e) {
+          return { value: defaultVal };
+        }
+      },
+      set: async (key, value) => {
+        try {
+          localStorage.setItem(key, value);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+    };
+
+    /* ---------- date helpers ---------- */
+    function fmtDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    function todayStr() {
+      return fmtDate(new Date());
+    }
+    function addDays(dateStr, n) {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + n);
+      return fmtDate(dt);
+    }
+    function dayLabel(dateStr, opts = {}) {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      const dt = new Date(y, m - 1, d);
+      return dt.toLocaleDateString("en-US", opts);
+    }
+    function isSameOrBefore(a, b) {
+      return a <= b;
+    }
+
+    /* ---------- streak / stats helpers ---------- */
+    function currentStreak(habitId, logs, ref) {
+      let streak = 0;
+      let cursor = ref;
+      if (!(logs[cursor] && logs[cursor][habitId])) {
+        cursor = addDays(cursor, -1);
+      }
+      while (logs[cursor] && logs[cursor][habitId]) {
+        streak += 1;
+        cursor = addDays(cursor, -1);
+      }
+      return streak;
+    }
+    function bestStreak(habitId, logs) {
+      const dates = Object.keys(logs)
+        .filter((d) => logs[d] && logs[d][habitId])
+        .sort();
+      if (dates.length === 0) return 0;
+      let best = 1;
+      let run = 1;
+      for (let i = 1; i < dates.length; i++) {
+        if (addDays(dates[i - 1], 1) === dates[i]) {
+          run += 1;
+        } else {
+          run = 1;
+        }
+        if (run > best) best = run;
+      }
+      return best;
+    }
+    function completionCount(habitId, logs) {
+      return Object.keys(logs).filter((d) => logs[d] && logs[d][habitId]).length;
+    }
+
+    /* ---------- achievements system ---------- */
+    function checkAchievements(habits, logs, today) {
+      const achievements = [];
+      
+      habits.forEach((h) => {
+        const streak = currentStreak(h.id, logs, today);
+        const best = bestStreak(h.id, logs);
+        const count = completionCount(h.id, logs);
+        
+        if (streak === 7) achievements.push({ id: `${h.id}-7d`, label: "Week Warrior", desc: `${h.name}: 7-day streak!` });
+        if (streak === 30) achievements.push({ id: `${h.id}-30d`, label: "Month Master", desc: `${h.name}: 30-day streak!` });
+        if (streak === 100) achievements.push({ id: `${h.id}-100d`, label: "Century Club", desc: `${h.name}: 100-day streak!` });
+        if (count === 10) achievements.push({ id: `${h.id}-10x`, label: "Getting Started", desc: `${h.name}: 10 completions!` });
+        if (count === 100) achievements.push({ id: `${h.id}-100x`, label: "Centurion", desc: `${h.name}: 100 completions!` });
+      });
+      
+      return achievements;
+    }
+
+    /* ---------- UI icons ---------- */
+    function IconFlame({ size = 14, color = T.amber }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 2c1 3-2 4-2 7a4 4 0 108 0c0-1-.5-2-1-2 .5 2-.5 3-1.5 3 1-2-1-4-2-5 .3 1.5-.5 2-1.5 1.5C13 5 12.5 3.5 12 2z"
+            fill={color}
+          />
+        </svg>
+      );
+    }
+    function IconCheck({ size = 14 }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <path d="M4 12l6 6L20 6" stroke={T.bg} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+    function IconPlus({ size = 16, color = T.bg }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <path d="M12 5v14M5 12h14" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+      );
+    }
+    function IconTrash({ size = 14, color = T.textFaint }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <path
+            d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"
+            stroke={color}
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    }
+    function IconChevron({ dir = "left", size = 16, color = T.textDim }) {
+      const d = dir === "left" ? "M15 6l-6 6 6 6" : "M9 6l6 6-6 6";
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <path d={d} stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+
+    /* ---------- daily quote component ---------- */
+    function DailyQuote() {
+      const [quoteIndex, setQuoteIndex] = useState(0);
+      const quote = MOTIVATIONAL_QUOTES[quoteIndex];
+      
+      const nextQuote = () => {
+        setQuoteIndex((prev) => (prev + 1) % MOTIVATIONAL_QUOTES.length);
+      };
+      
+      return (
+        <div style={{
+          background: `linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)`,
+          border: `1px solid ${T.border}`,
+          borderRadius: 12,
+          padding: "24px 28px",
+          marginBottom: 20,
+          position: "relative",
+          overflow: "hidden"
+        }}>
+          <div style={{
+            position: "absolute",
+            top: -20,
+            right: -20,
+            fontSize: 80,
+            opacity: 0.1,
+            fontFamily: "Georgia, serif",
+          }}>
+            "
+          </div>
+          <div style={{
+            fontSize: 16,
+            fontStyle: "italic",
+            color: T.lime,
+            marginBottom: 12,
+            lineHeight: 1.6,
+            fontFamily: "Georgia, serif",
+            position: "relative",
+            zIndex: 1,
+          }}>
+            {quote.text}
+          </div>
+          <div style={{
+            fontSize: 12,
+            color: T.textDim,
+            textAlign: "right",
+            fontFamily: "'JetBrains Mono', monospace",
+            position: "relative",
+            zIndex: 1,
+          }}>
+            — {quote.author}
+          </div>
+          <button
+            onClick={nextQuote}
+            title="Next quote"
+            style={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: 6,
+              padding: "6px 8px",
+              color: T.textDim,
+              cursor: "pointer",
+              fontSize: 11,
+            }}
+          >
+            ↻
+          </button>
+        </div>
+      );
+    }
+
+    /* ---------- compound hero chart ---------- */
+    function CompoundHero({ best, totalHabits }) {
+      const days = Math.max(best + 20, 45);
+      const w = 640;
+      const h = 160;
+      const padL = 44;
+      const padR = 16;
+      const padT = 16;
+      const padB = 26;
+      const maxVal = Math.pow(1.01, days);
+      const pts = [];
+      for (let i = 0; i <= days; i++) {
+        const x = padL + (i / days) * (w - padL - padR);
+        const val = Math.pow(1.01, i);
+        const y = padT + (1 - val / maxVal) * (h - padT - padB);
+        pts.push([x, y]);
+      }
+      const path = pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(" ");
+      const areaPath = `${path} L${pts[pts.length - 1][0]},${h - padB} L${pts[0][0]},${h - padB} Z`;
+      const markerX = padL + (best / days) * (w - padL - padR);
+      const markerVal = Math.pow(1.01, best);
+      const markerY = padT + (1 - markerVal / maxVal) * (h - padT - padB);
+      const yearMultiplier = Math.pow(1.01, 365).toFixed(1);
+
+      return (
+        <div
+          style={{
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: 14,
+            padding: "20px 22px 14px",
+            position: "relative",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              backgroundImage: `linear-gradient(${T.grid} 1px, transparent 1px), linear-gradient(90deg, ${T.grid} 1px, transparent 1px)`,
+              backgroundSize: "24px 24px",
+              opacity: 0.6,
+              pointerEvents: "none",
+            }}
+          />
+          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: "0.08em", color: T.textFaint, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase" }}>
+                the math of 1%
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
+                <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, fontWeight: 600, color: T.lime }}>
+                  {markerVal.toFixed(2)}×
+                </span>
+                <span style={{ fontSize: 13, color: T.textDim }}>
+                  better than day zero, at your best streak of {best} day{best === 1 ? "" : "s"}
+                </span>
+              </div>
+            </div>
+            <div style={{ textAlign: "right", fontSize: 12, color: T.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>
+              1.01^365 = {yearMultiplier}×<br />
+              <span style={{ color: T.textDim }}>keep the streak alive a full year</span>
+            </div>
+          </div>
+          <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 150, marginTop: 6, position: "relative" }}>
+            <defs>
+              <linearGradient id="heroFade" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={T.lime} stopOpacity="0.22" />
+                <stop offset="100%" stopColor={T.lime} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke={T.border} strokeWidth="1" />
+            <path d={areaPath} fill="url(#heroFade)" stroke="none" />
+            <path d={path} fill="none" stroke={T.lime} strokeWidth="2" strokeLinecap="round" />
+            {best > 0 && (
+              <>
+                <line x1={markerX} y1={markerY} x2={markerX} y2={h - padB} stroke={T.amber} strokeWidth="1" strokeDasharray="3,3" />
+                <circle cx={markerX} cy={markerY} r="4.5" fill={T.amber} stroke={T.bg} strokeWidth="2" />
+              </>
+            )}
+            <text x={padL} y={h - 6} fontSize="10" fill={T.textFaint} fontFamily="'JetBrains Mono', monospace">
+              day 0
+            </text>
+            <text x={w - padR} y={h - 6} fontSize="10" fill={T.textFaint} fontFamily="'JetBrains Mono', monospace" textAnchor="end">
+              day {days}
+            </text>
+          </svg>
+          {totalHabits === 0 && (
+            <div style={{ position: "relative", fontSize: 12, color: T.textDim, marginTop: 2 }}>
+              add your first habit below to start the curve moving.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ---------- add habit form ---------- */
+    function AddHabitForm({ onAdd, onCancel, templates }) {
+      const [name, setName] = useState("");
+      const [color, setColor] = useState(HABIT_COLORS[0].hex);
+      const [category, setCategory] = useState("personal");
+      const [difficulty, setDifficulty] = useState("medium");
+      const [frequency, setFrequency] = useState("daily");
+      const [showTemplates, setShowTemplates] = useState(false);
+      const inputRef = useRef(null);
+      
+      useEffect(() => {
+        inputRef.current && inputRef.current.focus();
+      }, []);
+      
+      const submit = () => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        onAdd({ name: trimmed, color, category, difficulty, frequency });
+        setName("");
+      };
+      
+      const useTemplate = (template) => {
+        setName(template.name);
+        setCategory(template.category);
+        setDifficulty(template.difficulty);
+        setFrequency(template.frequency);
+        setShowTemplates(false);
+      };
+      
+      return (
+        <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="e.g. read 10 pages, no sugar, morning walk"
+            style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8, padding: "10px 12px", color: T.text, fontSize: 14, outline: "none", fontFamily: "'Inter', sans-serif" }}
+          />
+          
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <label style={{ color: T.textFaint, display: "block", marginBottom: 4 }}>Category</label>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ width: "100%", padding: "6px 8px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text }}>
+                {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <label style={{ color: T.textFaint, display: "block", marginBottom: 4 }}>Difficulty</label>
+              <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} style={{ width: "100%", padding: "6px 8px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text }}>
+                {DIFFICULTY_LEVELS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 130 }}>
+              <label style={{ color: T.textFaint, display: "block", marginBottom: 4 }}>Frequency</label>
+              <select value={frequency} onChange={(e) => setFrequency(e.target.value)} style={{ width: "100%", padding: "6px 8px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text }}>
+                <option value="daily">Daily</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekends">Weekends</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+          </div>
+          
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: T.textFaint }}>color</span>
+            {HABIT_COLORS.map((c) => (
+              <button key={c.hex} onClick={() => setColor(c.hex)} aria-label={c.name} style={{ width: 20, height: 20, borderRadius: "50%", background: c.hex, border: color === c.hex ? `2px solid ${T.text}` : "2px solid transparent", cursor: "pointer", padding: 0 }} />
+            ))}
+            <div style={{ flex: 1 }} />
+            <button onClick={() => setShowTemplates(!showTemplates)} style={{ background: "transparent", border: "none", color: T.lime, fontSize: 12, cursor: "pointer", padding: "4px 8px", textDecoration: "underline" }}>
+              {showTemplates ? "hide" : "templates"}
+            </button>
+          </div>
+          
+          {showTemplates && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+              {HABIT_TEMPLATES.map((t, i) => (
+                <button key={i} onClick={() => useTemplate(t)} style={{ padding: "8px 10px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, cursor: "pointer", textAlign: "left" }}>
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+          
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={onCancel} style={{ background: "transparent", border: "none", color: T.textDim, fontSize: 13, cursor: "pointer", padding: "6px 10px" }}>
+              cancel
+            </button>
+            <button onClick={submit} style={{ background: T.lime, border: "none", color: T.bg, fontSize: 13, fontWeight: 600, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
+              add habit
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ---------- today tab ---------- */
+    function TodayTab({ habits, logs, onToggle, onDelete, todayDate, onUpdateHabitNote, notes }) {
+      const today = todayDate;
+      const [editNote, setEditNote] = useState(null);
+      const [noteText, setNoteText] = useState("");
+      
+      if (habits.length === 0) {
+        return (
+          <div style={{ padding: "40px 10px", textAlign: "center", color: T.textDim, fontSize: 14 }}>
+            no habits yet. add one above and today's row will show up here.
+          </div>
+        );
+      }
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {habits.map((h) => {
+            const done = !!(logs[today] && logs[today][h.id]);
+            const streak = currentStreak(h.id, logs, today);
+            const catInfo = CATEGORIES.find(c => c.id === h.category);
+            const diffInfo = DIFFICULTY_LEVELS.find(d => d.id === h.difficulty);
+            const habitNote = notes?.[today]?.[h.id] || "";
+            
+            return (
+              <div key={h.id} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: h.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, color: done ? T.textDim : T.text, textDecoration: done ? "line-through" : "none" }}>
+                      {h.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.textFaint, marginTop: 2 }}>
+                      {catInfo?.name} • {diffInfo?.label}
+                    </div>
+                  </div>
+                  {streak > 0 && (
+                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: T.amber }}>
+                      <IconFlame />
+                      {streak}
+                    </span>
+                  )}
+                  <button onClick={() => onDelete(h.id)} aria-label="delete habit" style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4, display: "flex" }}>
+                    <IconTrash />
+                  </button>
+                  <button
+                    onClick={() => onToggle(h.id, today)}
+                    aria-label={done ? "mark not done" : "mark done"}
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 7,
+                      border: `1.5px solid ${done ? h.color : T.border}`,
+                      background: done ? h.color : "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {done && <IconCheck />}
+                  </button>
+                </div>
+                {done && (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+                    <input
+                      type="text"
+                      value={editNote === h.id ? noteText : (habitNote || "")}
+                      onChange={(e) => {
+                        setEditNote(h.id);
+                        setNoteText(e.target.value);
+                      }}
+                      onBlur={() => {
+                        if (editNote === h.id) {
+                          onUpdateHabitNote(h.id, today, noteText);
+                          setEditNote(null);
+                        }
+                      }}
+                      placeholder="Add note..."
+                      style={{
+                        flex: 1,
+                        background: T.bg,
+                        border: `1px solid ${T.border}`,
+                        borderRadius: 6,
+                        padding: "6px 8px",
+                        color: T.text,
+                        fontSize: 12,
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    /* ---------- week tab ---------- */
+    function WeekTab({ habits, logs, onToggle, today }) {
+      const days = [];
+      for (let i = 6; i >= 0; i--) days.push(addDays(today, -i));
+
+      if (habits.length === 0) {
+        return (
+          <div style={{ padding: "40px 10px", textAlign: "center", color: T.textDim, fontSize: 14 }}>
+            add a habit to see its weekly grid.
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 480 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr repeat(7, 36px)", gap: 6, marginBottom: 6 }}>
+              <div />
+              {days.map((d) => (
+                <div key={d} style={{ textAlign: "center", fontSize: 10, color: T.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>
+                  {dayLabel(d, { weekday: "short" }).slice(0, 2)}
+                  <div style={{ color: d === today ? T.lime : T.textFaint }}>{dayLabel(d, { day: "numeric" })}</div>
+                </div>
+              ))}
+            </div>
+            {habits.map((h) => (
+              <div key={h.id} style={{ display: "grid", gridTemplateColumns: "1fr repeat(7, 36px)", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text, overflow: "hidden" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: h.color, flexShrink: 0 }} />
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.name}</span>
+                </div>
+                {days.map((d) => {
+                  const done = !!(logs[d] && logs[d][h.id]);
+                  const future = d > today;
+                  return (
+                    <button
+                      key={d}
+                      disabled={future}
+                      onClick={() => onToggle(h.id, d)}
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 7,
+                        border: `1px solid ${done ? h.color : T.border}`,
+                        background: done ? h.color : "transparent",
+                        opacity: future ? 0.3 : 1,
+                        cursor: future ? "default" : "pointer",
+                        margin: "0 auto",
+                        display: "flex",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    /* ---------- month tab ---------- */
+    function MonthTab({ habits, logs, monthOffset, setMonthOffset, today }) {
+      const [ty, tm] = today.split("-").map(Number);
+      const base = new Date(ty, tm - 1 + monthOffset, 1);
+      const year = base.getFullYear();
+      const month = base.getMonth();
+      const monthName = base.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      const firstDow = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      const cells = [];
+      for (let i = 0; i < firstDow; i++) cells.push(null);
+      for (let d = 1; d <= daysInMonth; d++) {
+        const ds = fmtDate(new Date(year, month, d));
+        cells.push(ds);
+      }
+
+      const totalHabitsForDay = (ds) => {
+        if (habits.length === 0) return 0;
+        const dayLog = logs[ds] || {};
+        return habits.filter((h) => dayLog[h.id]).length;
+      };
+
+      const levelColor = (count, total) => {
+        if (total === 0 || count === 0) return T.surface2;
+        const ratio = count / total;
+        if (ratio >= 1) return T.lime;
+        if (ratio >= 0.66) return "#8FB53A";
+        if (ratio >= 0.33) return "#5C6B3A";
+        return "#3A3E2C";
+      };
+
+      return (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 14 }}>
+            <button
+              onClick={() => setMonthOffset((o) => o - 1)}
+              aria-label="previous month"
+              style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4 }}
+            >
+              <IconChevron dir="left" />
+            </button>
+            <span style={{ fontSize: 13, color: T.text, fontFamily: "'JetBrains Mono', monospace", minWidth: 130, textAlign: "center" }}>
+              {monthName}
+            </span>
+            <button
+              onClick={() => setMonthOffset((o) => Math.min(0, o + 1))}
+              disabled={monthOffset >= 0}
+              aria-label="next month"
+              style={{ background: "transparent", border: "none", cursor: monthOffset >= 0 ? "default" : "pointer", padding: 4, opacity: monthOffset >= 0 ? 0.3 : 1 }}
+            >
+              <IconChevron dir="right" />
+            </button>
+          </div>
+          {habits.length === 0 ? (
+            <div style={{ padding: "20px 10px", textAlign: "center", color: T.textDim, fontSize: 14 }}>
+              add a habit to build up the month view.
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, maxWidth: 320, margin: "0 auto" }}>
+                {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                  <div key={i} style={{ textAlign: "center", fontSize: 10, color: T.textFaint }}>
+                    {d}
+                  </div>
+                ))}
+                {cells.map((ds, i) => {
+                  if (!ds) return <div key={i} />;
+                  const count = totalHabitsForDay(ds);
+                  const isFuture = ds > today;
+                  return (
+                    <div
+                      key={i}
+                      title={`${ds}: ${count}/${habits.length} habits`}
+                      style={{
+                        width: "100%",
+                        aspectRatio: "1",
+                        borderRadius: 5,
+                        background: isFuture ? T.surface : levelColor(count, habits.length),
+                        border: ds === today ? `1.5px solid ${T.lime}` : `1px solid ${T.borderSoft}`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 9,
+                        color: T.textFaint,
+                      }}
+                    >
+                      {Number(ds.split("-")[2])}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 14, fontSize: 11, color: T.textFaint }}>
+                <span>less</span>
+                {[T.surface2, "#3A3E2C", "#5C6B3A", "#8FB53A", T.lime].map((c, i) => (
+                  <span key={i} style={{ width: 12, height: 12, borderRadius: 3, background: c, border: `1px solid ${T.borderSoft}` }} />
+                ))}
+                <span>more</span>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    /* ---------- stats tab ---------- */
+    function StatsTab({ habits, logs, today }) {
+      if (habits.length === 0) {
+        return (
+          <div style={{ padding: "40px 10px", textAlign: "center", color: T.textDim, fontSize: 14 }}>
+            stats show up once you have at least one habit logged.
+          </div>
+        );
+      }
+
+      const last30 = [];
+      for (let i = 29; i >= 0; i--) last30.push(addDays(today, -i));
+
+      let totalPossible = 0;
+      let totalDone = 0;
+      let totalWeight = 0;
+      let weightedDone = 0;
+      
+      habits.forEach((h) => {
+        const diffInfo = DIFFICULTY_LEVELS.find(d => d.id === h.difficulty);
+        const weight = diffInfo?.weight || 1;
+        
+        last30.forEach((d) => {
+          if (isSameOrBefore(d, today)) {
+            totalPossible += 1;
+            totalWeight += weight;
+            if (logs[d] && logs[d][h.id]) {
+              totalDone += 1;
+              weightedDone += weight;
+            }
+          }
+        });
+      });
+      
+      const overallRate = totalPossible ? Math.round((totalDone / totalPossible) * 100) : 0;
+      const weightedRate = totalWeight ? Math.round((weightedDone / totalWeight) * 100) : 0;
+      const longestOverall = Math.max(...habits.map((h) => bestStreak(h.id, logs)), 0);
+      const activeStreaks = habits.reduce((sum, h) => sum + (currentStreak(h.id, logs, today) > 0 ? 1 : 0), 0);
+
+      const weekly = [];
+      for (let w = 3; w >= 0; w--) {
+        const start = addDays(today, -6 - w * 7);
+        let done = 0;
+        let possible = 0;
+        for (let i = 0; i < 7; i++) {
+          const d = addDays(start, i);
+          if (d > today) continue;
+          habits.forEach((h) => {
+            possible += 1;
+            if (logs[d] && logs[d][h.id]) done += 1;
+          });
+        }
+        weekly.push({ label: `wk ${4 - w}`, rate: possible ? done / possible : 0 });
+      }
+
+      // Category breakdown
+      const categoryStats = {};
+      CATEGORIES.forEach((cat) => {
+        categoryStats[cat.id] = { done: 0, possible: 0, name: cat.name };
+      });
+      
+      habits.forEach((h) => {
+        if (!categoryStats[h.category]) {
+          categoryStats[h.category] = { done: 0, possible: 0, name: CATEGORIES.find(c => c.id === h.category)?.name || h.category };
+        }
+        last30.forEach((d) => {
+          if (isSameOrBefore(d, today)) {
+            categoryStats[h.category].possible += 1;
+            if (logs[d] && logs[d][h.id]) categoryStats[h.category].done += 1;
+          }
+        });
+      });
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8 }}>
+            {[
+              { label: "30-day rate", value: `${overallRate}%` },
+              { label: "weighted score", value: `${weightedRate}%` },
+              { label: "longest streak", value: `${longestOverall}d` },
+              { label: "active today", value: `${activeStreaks}/${habits.length}` },
+            ].map((s) => (
+              <div key={s.label} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ fontSize: 10, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 600, color: T.text, fontFamily: "'JetBrains Mono', monospace", marginTop: 3 }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: T.textFaint, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              weekly completion rate
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 80 }}>
+              {weekly.map((w) => (
+                <div key={w.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <div style={{ fontSize: 10, color: T.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{Math.round(w.rate * 100)}%</div>
+                  <div style={{ width: "100%", maxWidth: 35, height: 50, background: T.surface2, borderRadius: 4, display: "flex", alignItems: "flex-end", overflow: "hidden" }}>
+                    <div style={{ width: "100%", height: `${Math.max(w.rate * 100, 3)}%`, background: T.lime, borderRadius: "4px 4px 0 0" }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: T.textFaint }}>{w.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: T.textFaint, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              category performance
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {Object.entries(categoryStats).map(([catId, catData]) => {
+                if (catData.possible === 0) return null;
+                const rate = Math.round((catData.done / catData.possible) * 100);
+                const catInfo = CATEGORIES.find(c => c.id === catId);
+                return (
+                  <div key={catId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: catInfo?.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: T.text, minWidth: 70, flexShrink: 0 }}>{catData.name}</span>
+                    <div style={{ flex: 1, height: 5, background: T.surface2, borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${rate}%`, height: "100%", background: catInfo?.color || T.lime, borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 10, color: T.textDim, fontFamily: "'JetBrains Mono', monospace", minWidth: 50, textAlign: "right", flexShrink: 0 }}>
+                      {rate}%
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: T.textFaint, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              per-habit breakdown
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {habits.map((h) => {
+                const done = completionCount(h.id, logs);
+                const days30 = last30.filter((d) => d <= today).length;
+                const doneIn30 = last30.filter((d) => d <= today && logs[d] && logs[d][h.id]).length;
+                const rate = days30 ? Math.round((doneIn30 / days30) * 100) : 0;
+                const diffInfo = DIFFICULTY_LEVELS.find(d => d.id === h.difficulty);
+                return (
+                  <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: h.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: T.text, width: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>
+                      {h.name}
+                    </span>
+                    <span style={{ fontSize: 9, color: T.textFaint, fontFamily: "'JetBrains Mono', monospace", minWidth: 40 }}>
+                      {diffInfo?.label}
+                    </span>
+                    <div style={{ flex: 1, height: 5, background: T.surface2, borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${rate}%`, height: "100%", background: h.color, borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 10, color: T.textDim, fontFamily: "'JetBrains Mono', monospace", minWidth: 55, textAlign: "right", flexShrink: 0 }}>
+                      {rate}% · {done}d
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ---------- main app ---------- */
+    function HabitTracker() {
+      const [habits, setHabits] = useState([]);
+      const [logs, setLogs] = useState({});
+      const [notes, setNotes] = useState({});
+      const [tab, setTab] = useState("today");
+      const [showAdd, setShowAdd] = useState(false);
+      const [monthOffset, setMonthOffset] = useState(0);
+      const [loaded, setLoaded] = useState(false);
+      const [saveError, setSaveError] = useState(false);
+      const [undoStack, setUndoStack] = useState([]);
+      const [showAchievements, setShowAchievements] = useState(false);
+      const today = todayStr();
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const res = await window.storage.get(STORAGE_KEY, false);
+            if (res && res.value) {
+              const parsed = JSON.parse(res.value);
+              setHabits(parsed.habits || []);
+              setLogs(parsed.logs || {});
+              setNotes(parsed.notes || {});
+            }
+          } catch (e) {
+            // no data yet, start fresh
+          }
+          setLoaded(true);
+        })();
+      }, []);
+
+      const persist = useCallback(async (nextHabits, nextLogs, nextNotes) => {
+        try {
+          const result = await window.storage.set(STORAGE_KEY, JSON.stringify({ habits: nextHabits, logs: nextLogs, notes: nextNotes }), false);
+          setSaveError(!result);
+        } catch (e) {
+          setSaveError(true);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (!loaded) return;
+        persist(habits, logs, notes);
+      }, [habits, logs, notes, loaded, persist]);
+
+      const addHabit = (h) => {
+        const habit = { id: `h_${Date.now()}_${Math.floor(Math.random() * 1000)}`, name: h.name, color: h.color, category: h.category || "personal", difficulty: h.difficulty || "medium", frequency: h.frequency || "daily", createdAt: today };
+        setUndoStack([{ type: "add", data: { habits, logs, notes } }]);
+        setHabits((prev) => [...prev, habit]);
+        setShowAdd(false);
+      };
+      const deleteHabit = (id) => {
+        setUndoStack([{ type: "delete", data: { habits, logs, notes } }]);
+        setHabits((prev) => prev.filter((h) => h.id !== id));
+        setLogs((prev) => {
+          const next = {};
+          Object.keys(prev).forEach((d) => {
+            const { [id]: _, ...rest } = prev[d];
+            next[d] = rest;
+          });
+          return next;
+        });
+      };
+      const toggleLog = (habitId, dateStr) => {
+        setLogs((prev) => {
+          const dayLog = { ...(prev[dateStr] || {}) };
+          dayLog[habitId] = !dayLog[habitId];
+          return { ...prev, [dateStr]: dayLog };
+        });
+      };
+      const updateHabitNote = (habitId, dateStr, noteText) => {
+        setNotes((prev) => {
+          const dayNotes = { ...(prev[dateStr] || {}) };
+          dayNotes[habitId] = noteText;
+          return { ...prev, [dateStr]: dayNotes };
+        });
+      };
+      const undo = () => {
+        if (undoStack.length > 0) {
+          const lastAction = undoStack[0];
+          setHabits(lastAction.data.habits);
+          setLogs(lastAction.data.logs);
+          setNotes(lastAction.data.notes);
+          setUndoStack([]);
+        }
+      };
+
+      const exportData = () => {
+        const dataStr = JSON.stringify({ habits, logs, notes }, null, 2);
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `habit-tracker-backup-${today}.json`;
+        link.click();
+      };
+      const importData = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const parsed = JSON.parse(event.target?.result);
+            setHabits(parsed.habits || []);
+            setLogs(parsed.logs || {});
+            setNotes(parsed.notes || {});
+            alert("Data imported successfully!");
+          } catch (err) {
+            alert("Failed to import data. Invalid format.");
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const bestOverall = useMemo(() => Math.max(0, ...habits.map((h) => Math.max(bestStreak(h.id, logs), currentStreak(h.id, logs, today)))), [habits, logs, today]);
+      const achievements = useMemo(() => checkAchievements(habits, logs, today), [habits, logs, today]);
+
+      const tabs = [
+        { id: "today", label: "today" },
+        { id: "week", label: "week" },
+        { id: "month", label: "month" },
+        { id: "stats", label: "stats" },
+      ];
+
+      // Keyboard shortcuts
+      useEffect(() => {
+        const handleKeyPress = (e) => {
+          if (e.ctrlKey || e.metaKey) {
+            if (e.key === "z") {
+              e.preventDefault();
+              undo();
+            }
+            if (e.key === "s") {
+              e.preventDefault();
+              exportData();
+            }
+          }
+          if (e.key === "?" && !showAdd) {
+            setShowAchievements(!showAchievements);
+          }
+        };
+        window.addEventListener("keydown", handleKeyPress);
+        return () => window.removeEventListener("keydown", handleKeyPress);
+      }, [undoStack, showAchievements, showAdd]);
+
+      return (
+        <div style={{
+          display: "flex",
+          height: "100%",
+          background: `linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%)`,
+          color: T.text,
+          fontFamily: "'Inter', sans-serif",
+          overflow: "hidden",
+        }}>
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Georgia:ital@0;1&family=Playfair+Display:wght@700&display=swap');
+            * { box-sizing: border-box; }
+            input:focus { border-color: ${T.lime} !important; }
+            button { font-family: inherit; }
+            ::-webkit-scrollbar {
+              width: 6px;
+            }
+            ::-webkit-scrollbar-track {
+              background: ${T.surface};
+              border-radius: 3px;
+            }
+            ::-webkit-scrollbar-thumb {
+              background: ${T.border};
+              border-radius: 3px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+              background: ${T.textFaint};
+            }
+          `}</style>
+
+          {/* Left Sidebar - Quote & Branding */}
+          <div style={{
+            flex: "0 0 380px",
+            background: `linear-gradient(180deg, #0f0f1e 0%, #1a1a2e 100%)`,
+            borderRight: `1px solid ${T.border}`,
+            padding: "40px 28px",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            overflowY: "auto",
+          }}>
+            {/* Header */}
+            <div>
+              <div style={{
+                fontSize: 14,
+                fontWeight: 700,
+                fontFamily: "'Space Grotesk', sans-serif",
+                color: T.lime,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}>
+                ✨ Compound Progress
+              </div>
+              <div style={{
+                fontSize: 36,
+                fontWeight: 700,
+                fontFamily: "'Playfair Display', serif",
+                color: T.text,
+                marginBottom: 28,
+                lineHeight: 1.2,
+              }}>
+                1% Better
+              </div>
+              
+              {/* Quote */}
+              <DailyQuote />
+              
+              {/* Stats Cards on Sidebar */}
+              <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{
+                  background: T.surface,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                }}>
+                  <div style={{ fontSize: 10, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.05em" }}>Today's Date</div>
+                  <div style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: T.text,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    marginTop: 4,
+                  }}>
+                    {dayLabel(today, { weekday: "long", month: "long", day: "numeric" })}
+                  </div>
+                </div>
+                
+                <div style={{
+                  background: T.surface,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                }}>
+                  <div style={{ fontSize: 10, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.05em" }}>Total Habits</div>
+                  <div style={{
+                    fontSize: 24,
+                    fontWeight: 700,
+                    color: T.lime,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    marginTop: 4,
+                  }}>
+                    {habits.length}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              fontSize: 10,
+              color: T.textFaint,
+              textAlign: "center",
+              marginTop: 20,
+              paddingTop: 14,
+              borderTop: `1px solid ${T.border}`,
+            }}>
+              <div style={{ marginBottom: 8 }}>Building better habits</div>
+              <div>one day at a time</div>
+            </div>
+          </div>
+
+          {/* Right Main Panel - Tracker */}
+          <div style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            padding: "40px 40px",
+            overflowY: "auto",
+            maxHeight: "100vh",
+          }}>
+            {/* Top Control Bar */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 28,
+              paddingBottom: 16,
+              borderBottom: `1px solid ${T.border}`,
+            }}>
+              <div>
+                <div style={{
+                  fontSize: 12,
+                  letterSpacing: "0.08em",
+                  color: T.limeDim,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                }}>
+                  Your Progress
+                </div>
+                <div style={{
+                  fontSize: 28,
+                  fontWeight: 700,
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  color: T.lime,
+                }}>
+                  Dashboard
+                </div>
+              </div>
+              
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button onClick={() => setShowAdd((s) => !s)} style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: T.lime,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  color: T.bg,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}>
+                  <IconPlus size={14} /> Add Habit
+                </button>
+                <button onClick={exportData} title="Export data (Ctrl+S)" style={{
+                  padding: "10px 12px",
+                  background: T.surface,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 8,
+                  color: T.text,
+                  fontSize: 11,
+                  cursor: "pointer",
+                }}>
+                  📥 Export
+                </button>
+                <label style={{
+                  padding: "10px 12px",
+                  background: T.surface,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 8,
+                  color: T.text,
+                  fontSize: 11,
+                  cursor: "pointer",
+                }}>
+                  <input type="file" accept=".json" onChange={importData} style={{ display: "none" }} />
+                  📤 Import
+                </label>
+              </div>
+            </div>
+
+            {/* Main Content */}
+            <div style={{ flex: 1, overflowY: "auto", paddingRight: 16 }}>
+              <div style={{ marginBottom: 20 }}>
+                <CompoundHero best={bestOverall} totalHabits={habits.length} />
+              </div>
+
+              {showAchievements && achievements.length > 0 && (
+                <div style={{
+                  marginBottom: 20,
+                  background: T.surface,
+                  border: `1px solid ${T.amber}`,
+                  borderRadius: 10,
+                  padding: 14,
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.amber, marginBottom: 10 }}>🏆 New Achievements!</div>
+                  {achievements.map((a) => (
+                    <div key={a.id} style={{ fontSize: 11, color: T.text, padding: "6px 0", borderBottom: `1px solid ${T.border}`, paddingBottom: 6, marginBottom: 6 }}>
+                      <strong>{a.label}</strong> - {a.desc}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {showAdd && (
+                <div style={{ marginBottom: 20 }}>
+                  <AddHabitForm onAdd={addHabit} onCancel={() => setShowAdd(false)} />
+                </div>
+              )}
+
+              {/* Tabs */}
+              <div style={{
+                display: "flex",
+                gap: 6,
+                marginBottom: 20,
+                borderBottom: `1px solid ${T.border}`,
+                paddingBottom: 12,
+              }}>
+                {tabs.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      borderBottom: tab === t.id ? `2px solid ${T.lime}` : "2px solid transparent",
+                      color: tab === t.id ? T.text : T.textDim,
+                      fontSize: 13,
+                      fontWeight: tab === t.id ? 600 : 400,
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      textTransform: "capitalize",
+                      fontFamily: "'Inter', sans-serif",
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+                <div style={{ flex: 1 }} />
+                <button onClick={() => setShowAchievements(!showAchievements)} title="Press ? for achievements" style={{
+                  background: "transparent",
+                  border: "none",
+                  color: achievements.length > 0 ? T.amber : T.textFaint,
+                  fontSize: 18,
+                  cursor: "pointer",
+                  padding: 0,
+                }}>
+                  🏆
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              {!loaded ? (
+                <div style={{ padding: "40px 10px", textAlign: "center", color: T.textDim, fontSize: 13 }}>loading your habits…</div>
+              ) : (
+                <>
+                  {tab === "today" && <TodayTab habits={habits} logs={logs} onToggle={toggleLog} onDelete={deleteHabit} todayDate={today} onUpdateHabitNote={updateHabitNote} notes={notes} />}
+                  {tab === "week" && <WeekTab habits={habits} logs={logs} onToggle={toggleLog} today={today} />}
+                  {tab === "month" && <MonthTab habits={habits} logs={logs} monthOffset={monthOffset} setMonthOffset={setMonthOffset} today={today} />}
+                  {tab === "stats" && <StatsTab habits={habits} logs={logs} today={today} />}
+                </>
+              )}
+
+              {saveError && (
+                <div style={{ marginTop: 16, fontSize: 12, color: T.coral, textAlign: "center" }}>
+                  couldn't save just now — your changes may not persist. try again in a moment.
+                </div>
+              )}
+
+              <div style={{ marginTop: 24, fontSize: 11, color: T.textFaint, textAlign: "center" }}>
+                ⌨️ Shortcuts: Ctrl+Z (undo) · Ctrl+S (export) · ? (achievements)
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Render the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<HabitTracker />);
+  </script>
+</body>
+</html>
